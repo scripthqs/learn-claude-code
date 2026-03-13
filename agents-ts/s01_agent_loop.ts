@@ -8,6 +8,10 @@ import * as dotenv from "dotenv";
 // 读取上一级的 .env
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
+if (process.env.ANTHROPIC_BASE_URL) {
+  delete process.env.ANTHROPIC_AUTH_TOKEN;
+}
+
 // process：获取当前进程的环境信息
 
 const client = new Anthropic({
