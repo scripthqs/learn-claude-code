@@ -18,73 +18,8 @@ const client = new Anthropic({
 });
 const MODEL = process.env.MODEL_ID!;
 
-const SYSTEM = `You are a coding agent at ${WORKDIR}.
-Use the todo tool to plan multi-step tasks. Mark in_progress before starting, completed when done.
-Prefer tools over prose.`;
-
-type TodoStatus = "pending" | "in_progress" | "completed";
-type TodoItem = { id: string; text: string; status: TodoStatus };
-
-class TodoManager {
-  private items: TodoItem[] = [];
-
-  update(items: unknown[]): string {
-    if (items.length > 20) {
-      throw new Error("Max 20 todos allowed");
-    }
-
-    const validated: TodoItem[] = [];
-    let inProgressCount = 0;
-
-    for (let i = 0; i < items.length; i += 1) {
-      const raw = (items[i] ?? {}) as Record<string, unknown>;
-      const id = String(raw.id ?? String(i + 1));
-      const text = String(raw.text ?? "").trim();
-      const status = String(raw.status ?? "pending").toLowerCase();
-
-      if (!text) {
-        throw new Error(`Item ${id}: text required`);
-      }
-      if (!["pending", "in_progress", "completed"].includes(status)) {
-        throw new Error(`Item ${id}: invalid status '${status}'`);
-      }
-      if (status === "in_progress") {
-        inProgressCount += 1;
-      }
-
-      validated.push({ id, text, status: status as TodoStatus });
-    }
-
-    if (inProgressCount > 1) {
-      throw new Error("Only one task can be in_progress at a time");
-    }
-
-    this.items = validated;
-    return this.render();
-  }
-
-  render(): string {
-    if (this.items.length === 0) {
-      return "No todos.";
-    }
-
-    const lines: string[] = [];
-    for (const item of this.items) {
-      const marker = {
-        pending: "[ ]",
-        in_progress: "[>]",
-        completed: "[x]",
-      }[item.status];
-      lines.push(`${marker} #${item.id}: ${item.text}`);
-    }
-
-    const done = this.items.filter((t) => t.status === "completed").length;
-    lines.push(`\n(${done}/${this.items.length} completed)`);
-    return lines.join("\n");
-  }
-}
-
-const TODO = new TodoManager();
+const SYSTEM = `You are a coding agent at ${WORKDIR}. Use the task tool to delegate exploration or subtasks.`;
+const SUBAGENT_SYSTEM = `You are a coding subagent at ${WORKDIR}. Complete the given task, then summarize your findings.`;
 
 function safePath(p: string): string {
   const fullPath = path.resolve(WORKDIR, p);
@@ -106,6 +41,7 @@ function runBash(command: string): string {
       cwd: WORKDIR,
       encoding: "utf8",
       timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
     });
     const out = output.trim();
     return out ? out.slice(0, 50000) : "(no output)";
@@ -158,16 +94,15 @@ function runEdit(filePath: string, oldText: string, newText: string): string {
 type ToolInput = Record<string, unknown>;
 type ToolHandler = (input: ToolInput) => string;
 
-//工具路由
 const TOOL_HANDLERS: Record<string, ToolHandler> = {
   bash: (kw) => runBash(String(kw.command ?? "")),
   read_file: (kw) => runRead(String(kw.path ?? ""), kw.limit as number | undefined),
   write_file: (kw) => runWrite(String(kw.path ?? ""), String(kw.content ?? "")),
   edit_file: (kw) => runEdit(String(kw.path ?? ""), String(kw.old_text ?? ""), String(kw.new_text ?? "")),
-  todo: (kw) => TODO.update((kw.items as unknown[]) ?? []),
 };
 
-const TOOLS: Anthropic.Tool[] = [
+//自带了工具 不含task
+const CHILD_TOOLS: Anthropic.Tool[] = [
   {
     name: "bash",
     description: "Run a shell command.",
@@ -208,53 +143,55 @@ const TOOLS: Anthropic.Tool[] = [
       required: ["path", "old_text", "new_text"],
     },
   },
+];
+
+// 生成一个全新上下文的子 agent，父 agent 和子 agent 共享文件系统，但不共享对话历史。
+const PARENT_TOOLS: Anthropic.Tool[] = [
+  ...CHILD_TOOLS,
   {
-    name: "todo",
-    description: "Update task list. Track progress on multi-step tasks.",
+    name: "task",
+    description: "Spawn a subagent with fresh context. It shares the filesystem but not conversation history.",
     input_schema: {
       type: "object",
       properties: {
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "string" },
-              text: { type: "string" },
-              status: {
-                type: "string",
-                enum: ["pending", "in_progress", "completed"],
-              },
-            },
-            required: ["id", "text", "status"],
-          },
+        prompt: { type: "string" },
+        description: {
+          type: "string",
+          description: "Short description of the task",
         },
       },
-      required: ["items"],
+      required: ["prompt"],
     },
   },
 ];
 
-async function agentLoop(messages: Anthropic.MessageParam[]) {
-  let roundsSinceTodo = 0;
+async function runSubagent(prompt: string): Promise<string> {
+  const subMessages: Anthropic.MessageParam[] = [{ role: "user", content: prompt }];
+  let summaryText = "";
 
-  while (true) {
+  // 子代理最多执行 30 轮，避免死循环。
+  for (let i = 0; i < 30; i += 1) {
+    // 子代理不拿 history，所以是“fresh context”。
     const response = await client.messages.create({
       model: MODEL,
-      system: SYSTEM,
-      messages,
-      tools: TOOLS,
+      system: SUBAGENT_SYSTEM,
+      messages: subMessages,
+      // 子代理只能调用 CHILD_TOOLS，不包含 task。
+      tools: CHILD_TOOLS,
       max_tokens: 8000,
     });
 
-    messages.push({ role: "assistant", content: response.content });
+    subMessages.push({ role: "assistant", content: response.content });
+    summaryText = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+
     if (response.stop_reason !== "tool_use") {
-      return;
+      break;
     }
 
-    const results: any[] = [];
-    let usedTodo = false;
-
+    const results: Anthropic.ToolResultBlockParam[] = [];
     for (const block of response.content) {
       if (block.type !== "tool_use") {
         continue;
@@ -262,24 +199,67 @@ async function agentLoop(messages: Anthropic.MessageParam[]) {
 
       const handler = TOOL_HANDLERS[block.name];
       let output: string;
-
       try {
         output = handler ? handler(block.input as ToolInput) : `Unknown tool: ${block.name}`;
       } catch (e: any) {
         output = `Error: ${String(e.message ?? e)}`;
       }
 
-      console.log(`> ${block.name}: ${output.slice(0, 200)}`);
-      results.push({ type: "tool_result", tool_use_id: block.id, content: output });
-      if (block.name === "todo") {
-        usedTodo = true;
-      }
+      results.push({
+        type: "tool_result",
+        tool_use_id: block.id,
+        content: output.slice(0, 50000),
+      });
     }
 
-    roundsSinceTodo = usedTodo ? 0 : roundsSinceTodo + 1;
-    // 连续 3 轮以上不调用 todo 时注入提醒。
-    if (roundsSinceTodo >= 3) {
-      results.unshift({ type: "text", text: "<reminder>Update your todos.</reminder>" });
+    subMessages.push({ role: "user", content: results });
+  }
+
+  return summaryText || "(no summary)";
+}
+
+async function agentLoop(messages: Anthropic.MessageParam[]) {
+  while (true) {
+    const response = await client.messages.create({
+      model: MODEL,
+      system: SYSTEM,
+      messages,
+      tools: PARENT_TOOLS,
+      max_tokens: 8000,
+    });
+    // 先把大模型的回复添加到 messages 中，这样在处理工具调用时，如果需要再次生成文本（如 task 的结果），就能看到之前的上下文和回复内容。
+    messages.push({ role: "assistant", content: response.content });
+
+    if (response.stop_reason !== "tool_use") {
+      return;
+    }
+
+    const results: Anthropic.ToolResultBlockParam[] = [];
+
+    //如果stop_reason==='tool_use'，说明模型发起了工具调用，需要外部执行后继续。
+
+    // 遍历 response.content 中的每个块，
+    for (const block of response.content) {
+      if (block.type !== "tool_use") {
+        continue;
+      }
+      // 如果块的类型是 "tool_use"，则根据块的 name 查找对应的工具处理函数，并执行相应的操作（如运行 bash 命令、读写文件等）。
+
+      let output: string;
+      //判断如果工具调用的名字是 "task"，则说明模型想要生成一个子代理来完成一个子任务。这时我们调用 runSubagent 函数，传入 task 的 prompt，运行一个全新的子代理来处理这个子任务，并把结果作为 output。
+      if (block.name === "task") {
+        const input = block.input as ToolInput;
+        const desc = String(input.description ?? "subtask");
+        const prompt = String(input.prompt ?? "");
+        console.log(`> task (${desc}): ${prompt.slice(0, 80)}`);
+        output = await runSubagent(prompt);
+      } else {
+        const handler = TOOL_HANDLERS[block.name];
+        output = handler ? handler(block.input as ToolInput) : `Unknown tool: ${block.name}`;
+      }
+
+      console.log(`  ${String(output).slice(0, 200)}`);
+      results.push({ type: "tool_result", tool_use_id: block.id, content: String(output) });
     }
 
     messages.push({ role: "user", content: results });
@@ -291,14 +271,15 @@ async function main() {
   const history: Anthropic.MessageParam[] = [];
 
   const ask = () => {
-    rl.question("\x1b[36ms03 >> \x1b[0m", async (query) => {
+    rl.question("\x1b[36ms04 >> \x1b[0m", async (query) => {
       if (!query || ["q", "exit"].includes(query.trim().toLowerCase())) {
         rl.close();
         return;
       }
-
+      // 把用户输入的 query 添加到 history 中，作为用户消息的一部分。这些消息将被传递给模型，以便它能够基于上下文生成回复。
       history.push({ role: "user", content: query });
       try {
+        //进入父代理循环
         await agentLoop(history);
       } catch (err) {
         console.error("agentLoop error:", err);
@@ -307,8 +288,8 @@ async function main() {
       const last = history[history.length - 1]?.content;
       if (Array.isArray(last)) {
         for (const block of last) {
-          if (typeof block === "object" && block && "text" in block) {
-            console.log((block as { text: string }).text);
+          if (typeof block === "object" && block && "type" in block && block.type === "text") {
+            console.log(block.text);
           }
         }
       }
