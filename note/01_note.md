@@ -57,6 +57,8 @@ SDK调用: 官方 SDK 简化签名、错误和重试，通常接受 model、syst
 
 消息是 JSON：messages 是数组，每项一般有 role 与 content，content 可以是字符串或结构化块数组。
 
+JSON Schema 就是“描述 JSON 数据结构和规则”的标准
+
 JSON Schema 基础：核心字段 type、properties、required。
 
 ```json
@@ -73,4 +75,11 @@ JSON Schema 基础：核心字段 type、properties、required。
 // 用 required 强制关键参数。
 // 对可能的枚举值使用 enum。
 // 对路径/命令做额外校验（不只是 schema，执行前再验证、安全检查）。
+
+// ==>
+// 合法的json
+{ "path": "src/app.ts", "start_line": 1, "end_line": 100 }
+//不合法的json，缺少了path
+{ "start_line": 1 }
 ```
+
