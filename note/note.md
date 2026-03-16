@@ -1,4 +1,4 @@
-# agent loop
+# agent
 
 每个代理都是一个持续调用模型直到说“停止”为止的循环。
 
@@ -83,3 +83,22 @@ JSON Schema 基础：核心字段 type、properties、required。
 { "start_line": 1 }
 ```
 
+## node fs
+
+```ts
+fs.readdirSync(d, { withFileTypes: true });
+//withFileTypes:默认是false 返回该目录下的条目名
+//返回 string[]
+["SKILL.md", "README.md", "utils", "index.ts"]
+//withFileTypes:true
+//返回 fs.Dirent[]
+[
+  { name: "SKILL.md", isFile: [Function], isDirectory: [Function], isSymbolicLink: [Function], ... },
+  { name: "utils",  isFile: [Function], isDirectory: [Function], ... }
+]
+
+// 返回的 name 只是文件/目录名；若需要完整路径 需要实用
+// path.join(dir, ent.name)
+
+// fs.readdirSync() 不承诺返回有确定顺序，遍历结果会受操作系统、文件系统、创建、缓存等影响
+```
