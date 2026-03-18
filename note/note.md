@@ -7,6 +7,7 @@
 5. 用到什么知识的适合，再去加载对应的知识
 6. 上下文会满，要想办法腾地方
 7. 大目标要拆成小任务, 排好序, 记在磁盘上
+8. 慢操作丢后台, agent 继续下一步
 
 LLM(大模型)：生成自然语言/结构化输出的模型。根据输入的prompt计算并返回响应（文本或结构化块）。
 
@@ -109,6 +110,42 @@ fs.readdirSync(d, { withFileTypes: true });
 // fs.readdirSync() 不承诺返回有确定顺序，遍历结果会受操作系统、文件系统、创建、缓存等影响
 ```
 
+path.dirname： —— 取目录
+path.resolve：就是终端模拟cd
+path.join: 拼路径，会自动处理分隔符，多了去掉、少了补上，保证结果是格式正确的路径。
+
+```js
+path.dirname("/a/b/c.txt");
+// /a/b
+```
+
+```bash
+# path.resolve 就是在终端里 cd
+cd /home/project
+cd /etc/passwd    # 绝对路径，直接跳到根目录
+# 当前位置：/etc/passwd
+
+cd /home/project
+cd ../../etc      # ../往上跳
+# 当前位置：/etc
+
+# 和 path.resolve 完全一致
+# path.resolve("/home/project", "/etc/passwd")  // → "/etc/passwd"
+# path.resolve("/home/project", "../../etc")    // → "/etc"
+```
+
+```js
+path.join("/home/project", "/etc/passwd");
+// → "/home/project/etc/passwd"
+//                 ↑ 两个 / 合并成一个
+path.join("/home/project/", "/etc/passwd");
+// → "/home/project/etc/passwd"
+//                 ↑ 同样合并
+path.join("/home/project", "etc/passwd");
+// → "/home/project/etc/passwd"
+//                 ↑ 自动加上
+```
+
 ## 管理数据
 
 任务管理、购物车（管理商品）、用户系统（管理用户）、聊天记录（管理消息）
@@ -121,4 +158,7 @@ fs.readdirSync(d, { withFileTypes: true });
 
 ## 工具类实现 IPO 模型
 
+Input（输入）→ Process（处理）→ Output（输出）
+Input（输入）→ Process（处理）→ Output（输出）
+Input（输入）→ Process（处理）→ Output（输出）
 Input（输入）→ Process（处理）→ Output（输出）
