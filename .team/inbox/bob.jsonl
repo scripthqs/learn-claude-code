@@ -1,0 +1,2 @@
+{"type":"broadcast","from":"lead","content":"Hello team! This is your team lead. Alice, please send a message to Bob introducing yourself and mentioning you have code that needs testing. Bob, please check your inbox for messages from Alice.","timestamp":1773804385.888}
+{"type":"message","from":"lead","content":"Hello Bob! This is Alice, the coder. I've just implemented a new user authentication feature that needs testing. Could you please review and test it when you have time?","timestamp":1773804405.083}
