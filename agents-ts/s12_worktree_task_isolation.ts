@@ -127,6 +127,7 @@ const SYSTEM =
 
 // -- EventBus: append-only lifecycle events for observability --
 
+// 记录操作日志, 只追加，不清空, 所有事件一个文件
 class EventBus {
   private filePath: string;
   // 事件日志文件路径
@@ -146,6 +147,7 @@ class EventBus {
     // 避免后续读取时报错
   }
 
+  // 写入一条事件
   emit(event: string, task: Record<string, any> = {}, worktree: Record<string, any> = {}, error?: string): void {
     const payload: EventPayload = {
       event,
@@ -154,26 +156,40 @@ class EventBus {
       worktree,
     };
     if (error) payload.error = error;
+    // 只有出错时才加 error 字段
+    // 不出错就不加，保持日志简洁
     fs.appendFileSync(this.filePath, JSON.stringify(payload) + "\n", "utf8");
+    // 追加一行到 events.jsonl
+    // 和 MessageBus 的 send 方法一样的模式
   }
 
+  // 读取最近的事件
   listRecent(limit: number = 20): string {
     const n = Math.max(1, Math.min(limit, 200));
     const lines = fs.readFileSync(this.filePath, "utf8").split("\n").filter(Boolean);
+    // 读取整个文件
+    // 按换行分割成数组
+    // filter(Boolean) 过滤掉空行
+    // （文件末尾通常有一个空行）
     const recent = lines.slice(-n);
+    // 取最后 n 行
+    // slice(-20) = 取最后20条
+    // 最新的事件在文件末尾
     const items = recent.map((line) => {
       try {
-        return JSON.parse(line);
+        return JSON.parse(line); // 解析成对象
       } catch {
         return { event: "parse_error", raw: line };
       }
     });
     return JSON.stringify(items, null, 2);
+    // 返回格式化的 JSON 字符串
+    // null, 2 表示缩进2个空格，方便阅读
   }
 }
 
 // -- TaskManager: persistent task board with optional worktree binding --
-
+// 管理 .tasks/ 目录里的任务文件
 class TaskManager {
   private dir: string;
   private nextId: number;
@@ -245,9 +261,11 @@ class TaskManager {
 
   bindWorktree(taskId: number, worktree: string, owner: string = ""): string {
     const task = this.load(taskId);
-    task.worktree = worktree;
+    task.worktree = worktree; // 记录绑定的 worktree 名字
     if (owner) task.owner = owner;
     if (task.status === "pending") task.status = "in_progress";
+    // 绑定 worktree 意味着开始工作了
+    // 自动把状态从 pending 改成 in_progress
     task.updated_at = Date.now() / 1000;
     this.save(task);
     return JSON.stringify(task, null, 2);
@@ -255,10 +273,12 @@ class TaskManager {
 
   unbindWorktree(taskId: number): string {
     const task = this.load(taskId);
-    task.worktree = "";
+    task.worktree = ""; // 清空 worktree 绑定
     task.updated_at = Date.now() / 1000;
     this.save(task);
     return JSON.stringify(task, null, 2);
+    // worktree 删除后调用
+    // 任务状态由调用方决定（可能是 completed，可能继续 in_progress）
   }
 
   listAll(): string {
@@ -266,6 +286,10 @@ class TaskManager {
       .readdirSync(this.dir)
       .filter((f) => f.match(/^task_\d+\.json$/))
       .sort();
+    // 读取所有任务文件，按文件名排序
+    // sort() 默认字符串排序
+    // task_1, task_10, task_2 → 注意：字符串排序可能不是数字顺序
+    // 但任务数量通常不多，影响不大
     if (!files.length) return "No tasks.";
     const lines = files.map((f) => {
       const t: Task = JSON.parse(fs.readFileSync(path.join(this.dir, f), "utf8"));
@@ -276,6 +300,7 @@ class TaskManager {
       };
       const owner = t.owner ? ` owner=${t.owner}` : "";
       const wt = t.worktree ? ` wt=${t.worktree}` : "";
+      // 有值才显示，没有就不显示，保持输出简洁
       return `${marker[t.status] ?? "[?]"} #${t.id}: ${t.subject}${owner}${wt}`;
     });
     return lines.join("\n");
@@ -284,13 +309,14 @@ class TaskManager {
 
 // -- WorktreeManager: create/list/run/remove git worktrees + lifecycle index --
 
+// 封装所有 git worktree 操作
 class WorktreeManager {
-  private repoRoot: string;
-  private tasks: TaskManager;
-  private events: EventBus;
-  private dir: string;
-  private indexPath: string;
-  public gitAvailable: boolean;
+  private repoRoot: string; // git 仓库根目录
+  private tasks: TaskManager; // 任务管理器，用来绑定/解绑任务
+  private events: EventBus; // 事件总线，记录操作日志
+  private dir: string; // .worktrees/ 目录路径
+  private indexPath: string; // .worktrees/index.json 路径
+  public gitAvailable: boolean; // 是否在 git 仓库里
 
   constructor(repoRoot: string, tasks: TaskManager, events: EventBus) {
     this.repoRoot = repoRoot;
@@ -299,10 +325,15 @@ class WorktreeManager {
     this.dir = path.join(repoRoot, ".worktrees");
     this.indexPath = path.join(this.dir, "index.json");
     fs.mkdirSync(this.dir, { recursive: true });
+    // 确保 .worktrees/ 目录存在
     if (!fs.existsSync(this.indexPath)) {
       fs.writeFileSync(this.indexPath, JSON.stringify({ worktrees: [] }, null, 2), "utf8");
+      // index.json 不存在就创建一个空的
+      // { worktrees: [] } 是初始结构
     }
     this.gitAvailable = this.isGitRepo();
+    // 检测是否在 git 仓库里
+    // 结果存起来，后续每次操作前检查
   }
 
   private isGitRepo(): boolean {
@@ -339,6 +370,8 @@ class WorktreeManager {
 
   private loadIndex(): WorktreeIndex {
     return JSON.parse(fs.readFileSync(this.indexPath, "utf8"));
+    // 每次操作都重新读文件
+    // 保证拿到最新状态
   }
 
   private saveIndex(data: WorktreeIndex): void {
@@ -347,28 +380,42 @@ class WorktreeManager {
 
   private find(name: string): WorktreeEntry | undefined {
     return this.loadIndex().worktrees.find((wt) => wt.name === name);
+    // 按名字查找 worktree
+    // 找不到返回 undefined
   }
 
   private validateName(name: string): void {
     if (!/^[A-Za-z0-9._-]{1,40}$/.test(name ?? "")) {
       throw new Error("Invalid worktree name. Use 1-40 chars: letters, numbers, ., _, -");
     }
+    // 正则校验：只允许字母数字和 . _ -
+    // 长度 1-40
+    // 防止路径注入，比如 name="../../etc/passwd"
   }
 
   create(name: string, taskId?: number, baseRef: string = "HEAD"): string {
-    this.validateName(name);
+    this.validateName(name); // 校验名字格式
     if (this.find(name)) throw new Error(`Worktree '${name}' already exists in index`);
     if (taskId !== undefined && !this.tasks.exists(taskId)) {
       throw new Error(`Task ${taskId} not found`);
     }
+    // 防止重复创建同名 worktree
 
     const wtPath = path.join(this.dir, name);
+    // worktree 的实际目录：.worktrees/auth-refactor
     const branch = `wt/${name}`;
+    // worktree 对应的分支名：wt/auth-refactor
+    // 统一加 wt/ 前缀，和普通分支区分
 
     this.events.emit("worktree.create.before", taskId !== undefined ? { id: taskId } : {}, { name, base_ref: baseRef });
+    // 记录操作开始
 
     try {
       this.runGit(["worktree", "add", "-b", branch, wtPath, baseRef]);
+      // 执行：git worktree add -b wt/auth-refactor .worktrees/auth-refactor HEAD
+      // -b branch：创建新分支
+      // wtPath：worktree 的目录
+      // baseRef：从哪个提交开始，默认 HEAD（当前最新）
 
       const entry: WorktreeEntry = {
         name,
@@ -382,9 +429,11 @@ class WorktreeManager {
       const idx = this.loadIndex();
       idx.worktrees.push(entry);
       this.saveIndex(idx);
+      // 把新 worktree 记录到 index.json
 
       if (taskId !== undefined) {
         this.tasks.bindWorktree(taskId, name);
+        // 同时更新任务文件，记录绑定关系
       }
 
       this.events.emit("worktree.create.after", taskId !== undefined ? { id: taskId } : {}, {
@@ -434,7 +483,7 @@ class WorktreeManager {
       return `Error: ${e.message}`;
     }
   }
-
+  // 在指定 worktree 目录执行
   run(name: string, command: string): string {
     const dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"];
     if (dangerous.some((d) => command.includes(d))) {
@@ -446,7 +495,7 @@ class WorktreeManager {
 
     try {
       const result = execSync(command, {
-        cwd: wt.path,
+        cwd: wt.path, // 关键：在 worktree 目录里执行
         timeout: 300000,
         maxBuffer: 50 * 1024 * 1024,
         stdio: ["pipe", "pipe", "pipe"],
@@ -460,7 +509,8 @@ class WorktreeManager {
       return out.slice(0, 50000) || `Error: ${e.message}`;
     }
   }
-
+  // 删除 worktree 目录 + 标记 status=removed
+  // 任务完成，代码已合并，不需要了
   remove(name: string, force: boolean = false, completeTask: boolean = false): string {
     const wt = this.find(name);
     if (!wt) return `Error: Unknown worktree '${name}'`;
@@ -498,7 +548,8 @@ class WorktreeManager {
       throw e;
     }
   }
-
+  // 不删除目录 + 标记 status=kept
+  // 任务完成，但想保留这个分支继续参考
   keep(name: string): string {
     const wt = this.find(name);
     if (!wt) return `Error: Unknown worktree '${name}'`;
@@ -519,7 +570,6 @@ class WorktreeManager {
     return kept ? JSON.stringify(kept, null, 2) : `Error: Unknown worktree '${name}'`;
   }
 }
-
 // -- Instantiate singletons --
 
 const TASKS = new TaskManager(path.join(REPO_ROOT, ".tasks"));
@@ -591,7 +641,7 @@ function runEdit(p: string, oldText: string, newText: string): string {
 }
 
 // -- Tool dispatch --
-
+// 工具被调用时实际执行的代码
 const TOOL_HANDLERS: Record<string, (...args: any[]) => any> = {
   bash: async ({ command }: any) => await runBash(command),
   read_file: ({ path: p, limit }: any) => runRead(p, limit),
@@ -610,11 +660,12 @@ const TOOL_HANDLERS: Record<string, (...args: any[]) => any> = {
   worktree_remove: ({ name, force, complete_task }: any) => WORKTREES.remove(name, force ?? false, complete_task ?? false),
   worktree_events: ({ limit }: any) => EVENTS.listRecent(limit ?? 20),
 };
-
+//  告诉 Claude 有哪些工具，怎么用
 const TOOLS = [
   {
     name: "bash",
     description: "Run a shell command in the current workspace (blocking).",
+    // description 是给 Claude 看的，Claude 靠这个决定什么时候用这个工具
     input_schema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
   },
   {
