@@ -39,15 +39,17 @@ MODEL = os.environ["MODEL_ID"]
 
 SYSTEM = f"You are a coding agent at {os.getcwd()}. Use bash to solve tasks. Act, don't explain."
 
-TOOLS = [{
-    "name": "bash",
-    "description": "Run a shell command.",
-    "input_schema": {
-        "type": "object",
-        "properties": {"command": {"type": "string"}},
-        "required": ["command"],
-    },
-}]
+TOOLS = [
+    {
+        "name": "bash",
+        "description": "Run a shell command.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    }
+]
 
 
 def run_bash(command: str) -> str:
@@ -55,8 +57,14 @@ def run_bash(command: str) -> str:
     if any(d in command for d in dangerous):
         return "Error: Dangerous command blocked"
     try:
-        r = subprocess.run(command, shell=True, cwd=os.getcwd(),
-                           capture_output=True, text=True, timeout=120)
+        r = subprocess.run(
+            command,
+            shell=True,
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
         out = (r.stdout + r.stderr).strip()
         return out[:50000] if out else "(no output)"
     except subprocess.TimeoutExpired:
@@ -67,8 +75,11 @@ def run_bash(command: str) -> str:
 def agent_loop(messages: list):
     while True:
         response = client.messages.create(
-            model=MODEL, system=SYSTEM, messages=messages,
-            tools=TOOLS, max_tokens=8000,
+            model=MODEL,
+            system=SYSTEM,
+            messages=messages,
+            tools=TOOLS,
+            max_tokens=8000,
         )
         # Append assistant turn
         messages.append({"role": "assistant", "content": response.content})
@@ -82,8 +93,9 @@ def agent_loop(messages: list):
                 print(f"\033[33m$ {block.input['command']}\033[0m")
                 output = run_bash(block.input["command"])
                 print(output[:200])
-                results.append({"type": "tool_result", "tool_use_id": block.id,
-                                "content": output})
+                results.append(
+                    {"type": "tool_result", "tool_use_id": block.id, "content": output}
+                )
         messages.append({"role": "user", "content": results})
 
 
