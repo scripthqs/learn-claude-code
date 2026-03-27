@@ -12,7 +12,8 @@ if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
 client = Anthropic(base_url=os.getenv("ANTHROPIC_BASE_URL"))
-embedding_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+model_name = "paraphrase-multilingual-MiniLM-L12-v2"
+embedding_model = SentenceTransformer(model_name)
 
 MODEL = os.environ["MODEL_ID"]
 SYSTEM = "你是一个AI助手，回答只能用中文，且每次回答不超过 50 个字,另外你可以使用工具"

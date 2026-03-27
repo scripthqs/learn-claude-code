@@ -10,6 +10,8 @@
 8. 慢操作丢后台, agent 继续下一步
 9. "任务太大一个人干不完, 要能分给队友" -- 持久化队友 + JSONL 邮箱。
 10. "队友之间要有统一的沟通规矩" -- 一个 request-response 模式驱动所有协商。
+11. "队友自己看看板, 有活就认领" -- 不需要领导逐个分配, 自组织。
+12. "各干各的目录, 互不干扰" -- 任务管目标, worktree 管目录, 按 ID 绑定。
 
 LLM(大模型)：生成自然语言/结构化输出的模型。根据输入的prompt计算并返回响应（文本或结构化块）。
 
@@ -160,7 +162,4 @@ path.join("/home/project", "etc/passwd");
 
 ## 工具类实现 IPO 模型
 
-Input（输入）→ Process（处理）→ Output（输出）
-Input（输入）→ Process（处理）→ Output（输出）
-Input（输入）→ Process（处理）→ Output（输出）
 Input（输入）→ Process（处理）→ Output（输出）
