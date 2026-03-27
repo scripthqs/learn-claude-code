@@ -94,62 +94,6 @@ JSON Schema 基础：核心字段 type、properties、required。
 { "start_line": 1 }
 ```
 
-## node fs
-
-```ts
-fs.readdirSync(d, { withFileTypes: true });
-//withFileTypes:默认是false 返回该目录下的条目名
-//返回 string[]
-["SKILL.md", "README.md", "utils", "index.ts"]
-//withFileTypes:true
-//返回 fs.Dirent[]
-[
-  { name: "SKILL.md", isFile: [Function], isDirectory: [Function], isSymbolicLink: [Function], ... },
-  { name: "utils",  isFile: [Function], isDirectory: [Function], ... }
-]
-
-// 返回的 name 只是文件/目录名；若需要完整路径 需要实用
-// path.join(dir, ent.name)
-
-// fs.readdirSync() 不承诺返回有确定顺序，遍历结果会受操作系统、文件系统、创建、缓存等影响
-```
-
-path.dirname： —— 取目录
-path.resolve：就是终端模拟cd
-path.join: 拼路径，会自动处理分隔符，多了去掉、少了补上，保证结果是格式正确的路径。
-
-```js
-path.dirname("/a/b/c.txt");
-// /a/b
-```
-
-```bash
-# path.resolve 就是在终端里 cd
-cd /home/project
-cd /etc/passwd    # 绝对路径，直接跳到根目录
-# 当前位置：/etc/passwd
-
-cd /home/project
-cd ../../etc      # ../往上跳
-# 当前位置：/etc
-
-# 和 path.resolve 完全一致
-# path.resolve("/home/project", "/etc/passwd")  // → "/etc/passwd"
-# path.resolve("/home/project", "../../etc")    // → "/etc"
-```
-
-```js
-path.join("/home/project", "/etc/passwd");
-// → "/home/project/etc/passwd"
-//                 ↑ 两个 / 合并成一个
-path.join("/home/project/", "/etc/passwd");
-// → "/home/project/etc/passwd"
-//                 ↑ 同样合并
-path.join("/home/project", "etc/passwd");
-// → "/home/project/etc/passwd"
-//                 ↑ 自动加上
-```
-
 ## 管理数据
 
 任务管理、购物车（管理商品）、用户系统（管理用户）、聊天记录（管理消息）
@@ -163,3 +107,21 @@ path.join("/home/project", "etc/passwd");
 ## 工具类实现 IPO 模型
 
 Input（输入）→ Process（处理）→ Output（输出）
+
+## agent的通用流程
+
+1. 接收任务：读取用户的目标、约束、成功标准
+2. 构建状态：整理上下文、历史记录、可用工具、风险级别
+3. 制定计划：拆分子任务，确定先后顺序和终止条件
+4. 选择动作：直接回答、调用工具、请求澄清、结束任务中决策
+5. 执行动作：调用工具或生成回复
+6. 处理反馈：解析工具结果、写入状态、判断是否成功
+7. 异常分支：失败：重试-》降级-》人工确认/终止
+8. 收敛输出：给出最终结果、依据、未完成项与下一步建议
+
+## 工作流编排
+
+- 工具返回先做schema校验和业务校验
+- 失败最多重复1到2次，并记录失败原因
+- 支持局部降级，输出"已完成+未完成+风险"
+- 有终止条件，设置最大步数、最大耗时、最大成本
